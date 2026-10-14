@@ -86,7 +86,7 @@ jobs:
           Write-Host 'windows setup test passed'
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: [validate, test-macos, test-windows]
     runs-on: ubuntu-latest
     permissions:
@@ -100,6 +100,11 @@ jobs:
         run: |
           set -euo pipefail
           ID="$(node scripts/json-tool.js get app.json id)"
+          VER="v$(node -e "console.log(require('./.claude-plugin/plugin.json').version)")"
           mkdir -p dist && (cd skills && zip -r "../dist/$ID-skill.zip" "$ID")
-          gh release create "${GITHUB_REF_NAME}" "dist/$ID-skill.zip" --title "$ID skill ${GITHUB_REF_NAME}" \
-            --notes "Skill zip for the Claude app: Customize > Skills > + > Create skill > Upload a skill. For Claude Code and the MCP setup see the README."
+          if gh release view "$VER" >/dev/null 2>&1; then
+            gh release upload "$VER" "dist/$ID-skill.zip" --clobber
+          else
+            gh release create "$VER" "dist/$ID-skill.zip" --target "$GITHUB_SHA" --latest --title "$ID skill $VER" \
+              --notes "Skill zip for the Claude app: Customize > Skills > + > Create skill > Upload a skill. For Claude Code and the MCP setup see the README."
+          fi
