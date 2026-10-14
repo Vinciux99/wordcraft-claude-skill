@@ -1,0 +1,105 @@
+name: ci
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate app.json, SKILL.md and scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/json-tool.js validate app.json
+          ID="$(node scripts/json-tool.js get app.json id)"
+          test -f "skills/$ID/SKILL.md"
+          head -n1 "skills/$ID/SKILL.md" | grep -qx -- '---'
+          grep -q "^name: $ID\$" "skills/$ID/SKILL.md"
+          grep -q '^description: ' "skills/$ID/SKILL.md"
+          bash -n scripts/artcraft-setup.sh
+          for k in id name upstream mcp.server mcp.live mcp.headless windows.app windows.cli macos.bundles macos.cliPaths; do
+            test -n "$(node scripts/json-tool.js get app.json $k)" || { echo "app.json: missing $k"; exit 1; }
+          done
+          echo "ok: $ID"
+
+  test-macos:
+    needs: validate
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the macOS setup against a fake install
+        shell: bash
+        run: |
+          set -euo pipefail
+          J="osascript -l JavaScript scripts/json-tool.js"
+          ID="$($J get app.json id)"; NAME="$($J get app.json name)"; SERVER="$($J get app.json mcp.server)"
+          export HOME="$RUNNER_TEMP/home"; mkdir -p "$HOME/Applications/$NAME.app/Contents/MacOS" "$HOME/.artcraft/bin" "$HOME/Desktop"
+          printf '#!/bin/sh\n' > "$HOME/.artcraft/bin/$ID-cli"; chmod +x "$HOME/.artcraft/bin/$ID-cli"
+          CFG="$RUNNER_TEMP/claude_desktop_config.json"; echo '{"mcpServers":{"existing":{"command":"x","args":[]}}}' > "$CFG"
+          # the CLI binary name inside the release zip may differ from $ID-cli; use whatever cliPaths lists first
+          FIRST="$($J get app.json macos.cliPaths --var home="$HOME" | head -n1)"
+          mkdir -p "$(dirname "$FIRST")"; cp "$HOME/.artcraft/bin/$ID-cli" "$FIRST" 2>/dev/null || true
+          bash scripts/artcraft-setup.sh --config app.json --mode both --claude-config "$CFG" --no-claude-code --no-download --skill-dir "skills/$ID"
+          test "$($J mcp-has "$CFG" existing)" = yes
+          test "$($J mcp-has "$CFG" "$SERVER")" = yes
+          test "$($J mcp-has "$CFG" "$SERVER-headless")" = yes
+          test -x "$HOME/Applications/$NAME (Claude).app/Contents/MacOS/launch"
+          test -f "$HOME/.claude/skills/$ID/SKILL.md"
+          ls "$CFG".backup-*
+
+  test-windows:
+    needs: validate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the Windows setup against a fake install
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = Get-Content -Raw app.json | ConvertFrom-Json
+          $fake = Join-Path $env:RUNNER_TEMP 'fake-install'
+          New-Item -ItemType Directory -Force -Path $fake | Out-Null
+          Set-Content -Path (Join-Path $fake $app.windows.app) -Value 'x'
+          Set-Content -Path (Join-Path $fake $app.windows.cli) -Value 'x'
+          $cfg = Join-Path $env:RUNNER_TEMP 'claude_desktop_config.json'
+          '{"mcpServers":{"existing":{"command":"x","args":[]}}}' | Set-Content -Path $cfg
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\artcraft-setup.ps1 -Config app.json -Mode both -InstallDir $fake -ClaudeConfigPath $cfg -NoClaudeCode -SkillDir "skills\$($app.id)"
+          if ($LASTEXITCODE -ne 0) { throw "setup failed" }
+          $j = Get-Content -Raw $cfg | ConvertFrom-Json
+          if (-not $j.mcpServers.existing) { throw 'existing server lost' }
+          $s = $j.mcpServers.($app.mcp.server)
+          if (-not $s) { throw 'server not written' }
+          if ($s.args -isnot [array]) { throw 'args is not an array' }
+          if (-not $j.mcpServers.("$($app.mcp.server)-headless")) { throw 'headless server not written' }
+          $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) "$($app.name) (Claude).lnk"
+          if (-not (Test-Path $lnk)) { throw "shortcut missing: $lnk" }
+          if (-not (Test-Path (Join-Path $env:USERPROFILE ".claude\skills\$($app.id)\SKILL.md"))) { throw 'skill not installed' }
+          Get-ChildItem "$cfg.backup-*" | Out-Null
+          Write-Host 'windows setup test passed'
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [validate, test-macos, test-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the skill zip and publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ID="$(node scripts/json-tool.js get app.json id)"
+          mkdir -p dist && (cd skills && zip -r "../dist/$ID-skill.zip" "$ID")
+          gh release create "${GITHUB_REF_NAME}" "dist/$ID-skill.zip" --title "$ID skill ${GITHUB_REF_NAME}" \
+            --notes "Skill zip for the Claude app: Customize > Skills > + > Create skill > Upload a skill. For Claude Code and the MCP setup see the README."

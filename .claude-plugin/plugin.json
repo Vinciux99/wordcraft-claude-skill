@@ -1,0 +1,16 @@
+{
+  "name": "wordcraft",
+  "version": "1.0.0",
+  "description": "Write, format, review and export documents (.docx, PDF) with WordCraft (Word-style, ArtCraft suite) through MCP, the CLI or the control channel, and set up, connect or troubleshoot its MCP server on Windows and macOS.",
+  "author": {
+    "name": "Vinciux99"
+  },
+  "homepage": "https://github.com/Vinciux99/wordcraft-claude-skill",
+  "license": "MIT",
+  "keywords": [
+    "artcraft",
+    "wordcraft",
+    "mcp",
+    "skill"
+  ]
+}

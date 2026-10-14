@@ -1,0 +1,62 @@
+{
+  "id": "wordcraft",
+  "name": "WordCraft",
+  "tagline": "Word-style document editor (.docx)",
+  "upstream": "storytold/wordcraft",
+  "port": 7987,
+  "docsPort": 7981,
+  "launch": {
+    "args": [
+      "--control",
+      "{port}"
+    ]
+  },
+  "mcp": {
+    "server": "wordcraft",
+    "live": [
+      "mcp",
+      "--connect",
+      "127.0.0.1:{port}"
+    ],
+    "headless": [
+      "mcp",
+      "--author",
+      "AI assistant"
+    ],
+    "default": "live"
+  },
+  "windows": {
+    "dirs": [
+      "{ProgramFiles}\\WordCraft",
+      "{LocalAppData}\\Programs\\WordCraft"
+    ],
+    "app": "wordcraft.exe",
+    "cli": "wordcraft-cli.exe"
+  },
+  "macos": {
+    "bundles": [
+      "/Applications/WordCraft.app",
+      "{home}/Applications/WordCraft.app"
+    ],
+    "appBinary": "Contents/MacOS/WordCraft",
+    "cliPaths": [
+      "{home}/.artcraft/bin/wordcraft-cli",
+      "/usr/local/bin/wordcraft-cli",
+      "/opt/homebrew/bin/wordcraft-cli",
+      "{bundle}/Contents/MacOS/wordcraft-cli"
+    ],
+    "cliReleaseAsset": "wordcraft-cli-{version}-macos-universal.zip",
+    "cliBinaryInZip": "wordcraft-cli"
+  },
+  "prepare": {
+    "dirs": []
+  },
+  "auth": {
+    "type": "key-file",
+    "notes": "The app writes a random key to {appdata}/WordCraft/control-key.local-{port} on every start; the CLI reads it automatically."
+  },
+  "verified": {
+    "windows": true,
+    "macos": false
+  }
+}
